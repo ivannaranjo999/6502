@@ -50,11 +50,29 @@ namespace m6502{
   };
 
   enum Opcode : byte {
+    /* LDA - 8 Ins */
     LDA_IMMEDIATE = 0xA9,
     LDA_ZEROPAGE  = 0xA5,
     LDA_ZEROPAGEX = 0xB5,
     LDA_ABSOLUTE  = 0xAD,
     LDA_ABSOLUTEX = 0xBD,
+    LDA_ABSOLUTEY = 0xB9,
+    LDA_INDIRECTX = 0xA1,
+    LDA_INDIRECTY = 0xB1,
+    /* LDX - 5 Ins */
+    LDX_IMMEDIATE = 0xA2,
+    LDX_ZEROPAGE  = 0xA6,
+    LDX_ZEROPAGEY = 0xB6,
+    LDX_ABSOLUTE  = 0xAE,
+    LDX_ABSOLUTEY = 0xBE,
+    /* LDY - 5 Ins */
+    LDY_IMMEDIATE = 0xA0,
+    LDY_ZEROPAGE  = 0xA4,
+    LDY_ZEROPAGEX = 0xB4,
+    LDY_ABSOLUTE  = 0xAC,
+    LDY_ABSOLUTEX = 0xBC,
+    /* STA - 7 Ins */
+    STA_ZEROPAGE  = 0x85,
   };
 
   enum class LogLevel : int {
@@ -96,7 +114,7 @@ namespace m6502{
     static constexpr u32 MAX_MEM = 1024 * 64;  // 64 KB
     byte data[MAX_MEM];
 
-    byte operator[](word addr) const { ++cycles; return data [addr]; }
+    byte operator[](word addr) const { ++cycles; return data[addr]; }
     byte& operator[](word addr) { ++cycles; return data[addr]; }
 
     void clear() {
@@ -152,24 +170,23 @@ namespace m6502{
       P.Flag.N = (value & 0b10000000) != 0;
     }
 
-    void execInstruction(const MEM& mem) {
+    void execInstruction(MEM& mem) {
       byte opcode = fetchByte(mem);
       
       switch(opcode) {
+        /* LDA - 8 Ins */
         case LDA_IMMEDIATE: {
           log(LogLevel::Info,"LDA Immediate\n");
           byte value = fetchByte(mem);
           A = value;
           setZN(A);
         } break;
-
         case LDA_ZEROPAGE: {
           log(LogLevel::Info,"LDA ZP\n");
           byte zpAddr = fetchByte(mem);
           A = mem[zpAddr];
           setZN(A);
         } break;
-
         case LDA_ZEROPAGEX: {
           log(LogLevel::Info,"LDA ZP X\n");
           byte zpAddr = fetchByte(mem);
@@ -177,7 +194,6 @@ namespace m6502{
           A = mem[zpAddr];
           setZN(A);
         } break;
-
         case LDA_ABSOLUTE: {
           log(LogLevel::Info,"LDA Absolute\n");
           byte lowAddr = fetchByte(mem);
@@ -186,16 +202,151 @@ namespace m6502{
           A = mem[addr];
           setZN(A);
         } break;
-
         case LDA_ABSOLUTEX: {
           log(LogLevel::Info,"LDA Absolute X\n");
           byte lowAddr = fetchByte(mem);
           byte highAddr = fetchByte(mem);
-          word addr = (lowAddr | (highAddr << 8)) + X;
+          word baseAddr = lowAddr | (highAddr << 8);
+          word addr = baseAddr + X;
+          if ((baseAddr & 0xFF00) != (addr & 0xFF00)) {
+            ++cycles;
+            log(LogLevel::Info, "Page crossed from 0x%04X to 0x%04X\n",baseAddr,addr);
+          }
           A = mem[addr];
           setZN(A);
         } break;
+        case LDA_ABSOLUTEY: {
+          log(LogLevel::Info,"LDA Absolute Y\n");
+          byte lowAddr = fetchByte(mem);
+          byte highAddr = fetchByte(mem);
+          word baseAddr = lowAddr | (highAddr << 8);
+          word addr = baseAddr + Y;
+          if ((baseAddr & 0xFF00) != (addr & 0xFF00)) {
+            ++cycles;
+            log(LogLevel::Info, "Page crossed from 0x%04X to 0x%04X\n",baseAddr,addr);
+          }
+          A = mem[addr];
+          setZN(A);
+        } break;
+        case LDA_INDIRECTX: {
+          log(LogLevel::Info,"LDA Indirect X\n");
+          byte zpAddr = fetchByte(mem);                   // 1. Get address at ZP
+          byte ptrAddr = (zpAddr + X) & 0xFF; ++cycles;   // 2. Add X to the ZP address
+          byte lowAddr = mem[ptrAddr];                    // 3. Get pointer
+          byte highAddr = mem[(ptrAddr + 1) & 0xFF];
+          word addr = lowAddr | (highAddr << 8); 
+          A = mem[addr];                                  // 4. Use that pointer to store to A
+          setZN(A);
+        } break;
+        case LDA_INDIRECTY: { // Not equal to Indirect X
+          log(LogLevel::Info,"LDA Indirect Y\n");
+          byte zpAddr = fetchByte(mem);                   // 1. Get address at ZP
+          byte lowAddr = mem[zpAddr];                     // 2. Get pointer
+          byte highAddr = mem[(zpAddr + 1) & 0xFF];
+          word baseAddr = lowAddr | (highAddr << 8);
+          word addr = baseAddr + Y;                       // 3. Add Y to the pointer
+          if ((baseAddr & 0xFF00) != (addr & 0xFF00)) {
+            ++cycles;
+            log(LogLevel::Info, "Page crossed from 0x%04X to 0x%04X\n",baseAddr,addr);
+          }
+          A = mem[addr];                                  // 4. Use that pointer to store to A
+          setZN(A);
+        } break;
 
+        /* LDX - 5 Ins */
+        case LDX_IMMEDIATE: {
+          log(LogLevel::Info,"LDX Immediate\n");
+          byte value = fetchByte(mem);
+          X = value;
+          setZN(X);
+        } break;
+        case LDX_ZEROPAGE: {
+          log(LogLevel::Info,"LDX ZP\n");
+          byte zpAddr = fetchByte(mem);
+          X = mem[zpAddr];
+          setZN(X);
+        } break;
+        case LDX_ZEROPAGEY: {
+          log(LogLevel::Info,"LDX ZP Y\n");
+          byte zpAddr = fetchByte(mem);
+          zpAddr = (zpAddr + Y) & 0xFF;
+          X = mem[zpAddr];
+          setZN(X);
+        } break;
+        case LDX_ABSOLUTE: {
+          log(LogLevel::Info,"LDX Absolute\n");
+          byte lowAddr = fetchByte(mem);
+          byte highAddr = fetchByte(mem);
+          word addr = lowAddr | (highAddr << 8);
+          X = mem[addr];
+          setZN(X);
+        } break;
+        case LDX_ABSOLUTEY: {
+          log(LogLevel::Info,"LDX Absolute Y\n");
+          byte lowAddr = fetchByte(mem);
+          byte highAddr = fetchByte(mem);
+          word baseAddr = lowAddr | (highAddr << 8);
+          word addr = baseAddr + Y;
+          if ((baseAddr & 0xFF00) != (addr & 0xFF00)) {
+            ++cycles;
+            log(LogLevel::Info, "Page crossed from 0x%04X to 0x%04X\n",baseAddr,addr);
+          }
+          X = mem[addr];
+          setZN(X);
+        } break;
+
+        /* LDY - 5 Ins */
+        case LDY_IMMEDIATE: {
+          log(LogLevel::Info,"LDY Immediate\n");
+          byte value = fetchByte(mem);
+          Y = value;
+          setZN(Y);
+        } break;
+        case LDY_ZEROPAGE: {
+          log(LogLevel::Info,"LDY ZP\n");
+          byte zpAddr = fetchByte(mem);
+          Y = mem[zpAddr];
+          setZN(Y);
+        } break;
+        case LDY_ZEROPAGEX: {
+          log(LogLevel::Info,"LDY ZP X\n");
+          byte zpAddr = fetchByte(mem);
+          zpAddr = (zpAddr + X) & 0xFF;
+          Y = mem[zpAddr];
+          setZN(Y);
+        } break;
+        case LDY_ABSOLUTE: {
+          log(LogLevel::Info,"LDY Absolute\n");
+          byte lowAddr = fetchByte(mem);
+          byte highAddr = fetchByte(mem);
+          word addr = lowAddr | (highAddr << 8);
+          Y = mem[addr];
+          setZN(Y);
+        } break;
+        case LDY_ABSOLUTEX: {
+          log(LogLevel::Info,"LDY Absolute X\n");
+          byte lowAddr = fetchByte(mem);
+          byte highAddr = fetchByte(mem);
+          word baseAddr = lowAddr | (highAddr << 8);
+          word addr = baseAddr + X;
+          if ((baseAddr & 0xFF00) != (addr & 0xFF00)) {
+            ++cycles;
+            log(LogLevel::Info, "Page crossed from 0x%04X to 0x%04X\n",baseAddr,addr);
+          }
+          Y = mem[addr];
+          setZN(Y);
+        } break;
+        
+        /* STA - 7 Ins */
+        case STA_ZEROPAGE: {
+          log(LogLevel::Info,"STA ZP\n");
+          byte zpAddr = fetchByte(mem);
+          word addr = zpAddr | 0x0000;
+          log(LogLevel::Info, "Addr 0x%04X\n",addr);
+          mem[addr] = A;
+        } break;
+
+        /* No opcode */
         default: {
           log(LogLevel::Error,"Unknown opcode: 0x%02X\n", opcode);
         } break;
@@ -237,15 +388,50 @@ int main()
   mem[0x0102] = 0xAB; //Byte to put in A
   */
   // Code 5: LDA Absolute X
+  /*
   cpu.X = 0x10; //LDX not implemented yet
   mem[0x8000] = 0xBD; // Instruction
   mem[0x8001] = 0x02; // Addr 0x0102
   mem[0x8002] = 0x01;
   mem[0x0112] = 0xAB; //Byte to put in A
+  */
+  // Code 6: LDA Absolute Y
+  /*
+  cpu.Y = 0x10; //LDX not implemented yet
+  mem[0x8000] = m6502::LDA_ABSOLUTEY; // Instruction
+  mem[0x8001] = 0xFF; // Addr 0x01FF
+  mem[0x8002] = 0x01;
+  mem[0x020F] = 0xAB; //Byte to put in A
+  */
+  // Code 7: LDA Indirect X
+  /*
+  cpu.X = 0x04; //LDX not implemented yet
+  mem[0x8000] = m6502::LDA_INDIRECTX; // Instruction
+  mem[0x8001] = 0xFB; // ZP address
+  mem[0x00FF] = 0x02; // Addr 0x0102
+  mem[0x0000] = 0x01;
+  mem[0x0102] = 0x14; // Byte to put in A
+  */
+  /*
+  // Code 8: LDA Indirect Y
+  cpu.Y = 0x02; //LDY not implemented yet
+  mem[0x8000] = m6502::LDA_INDIRECTY; // Instruction
+  mem[0x8001] = 0xFB; // ZP address
+  mem[0x00FB] = 0xFE; // Addr 0x01FE
+  mem[0x00FC] = 0x01;
+  mem[0x0200] = 0x44; // Byte to put in A
+  */
+  // Code 9: STA Zero Page
+  mem[0x8000] = m6502::LDA_IMMEDIATE; // Instruction 1
+  mem[0x8001] = 0x51; // Load byte in A
+  mem[0x8002] = m6502::STA_ZEROPAGE; // Instruction 2
+  mem[0x8003] = 0x11; // Addr to store A
   /* END OF EMBEDDED CODE */ 
 
   m6502::cycles = 0;
-  cpu.execInstruction(mem);
+  for (int nIns = 2; nIns > 0; --nIns){
+    cpu.execInstruction(mem);
+  }
 
   m6502::log(m6502::LogLevel::Info,"Final results:\n");
   m6502::log(m6502::LogLevel::Info,"  PC -> 0x%04X\n",cpu.PC);
@@ -253,4 +439,5 @@ int main()
   m6502::log(m6502::LogLevel::Info,"  Ac -> 0x%02X\n",cpu.A);
   m6502::log(m6502::LogLevel::Info,"  rX -> 0x%02X\n",cpu.X);
   m6502::log(m6502::LogLevel::Info,"  rY -> 0x%02X\n",cpu.Y);
+  m6502::log(m6502::LogLevel::Info,"  mem[0x%04X] -> 0x%02X\n",0x11,mem[0x11]);
 }
